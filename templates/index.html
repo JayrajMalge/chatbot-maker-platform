@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot Maker Platform</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <h1>Chatbot Maker Platform</h1>
+            <p>Create intelligent chatbots with ease</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="tabs">
+            <button class="tab-button active" data-tab="build">Build Chatbot</button>
+            <button class="tab-button" data-tab="documentation">Documentation</button>
+            <button class="tab-button" data-tab="my-chatbots">My Chatbots</button>
+        </div>
+
+        <div id="build" class="tab-content active">
+            <!-- Status Message -->
+            <div id="statusMessage" class="status-message"></div>
+            <form id="chatbot-form">
+                <div class="form-group">
+                    <label for="chatbot-name">Chatbot Name *</label>
+                    <input type="text" id="chatbot-name" name="chatbot-name" required placeholder="Enter a name for your chatbot">
+                </div>
+
+                <div id="intents-container">
+                    <!-- Intents will be added here dynamically -->
+                </div>
+
+                <button type="button" id="add-intent-btn" class="btn btn-secondary">Add Intent</button>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Create Chatbot</button>
+                    <button type="button" id="reset-form" class="btn btn-danger">Reset Form</button>
+                </div>
+            </form>
+        </div>
+
+        <div id="documentation" class="tab-content">
+            <h2>Documentation</h2>
+            <div class="documentation-content">
+                <h3>Getting Started</h3>
+                <p>Welcome to the Chatbot Maker Platform! Follow these steps to create your first chatbot:</p>
+                <ol>
+                    <li>Enter a name for your chatbot</li>
+                    <li>Add intents to define what your chatbot can understand and respond to</li>
+                    <li>For each intent, add questions that users might ask</li>
+                    <li>For each intent, add answers that your chatbot will respond with</li>
+                    <li>Click submit to save your chatbot</li>
+                </ol>
+
+                <h3>What are Intents?</h3>
+                <p>Intents represent the purpose or goal behind a user's message. For example, if a user asks "What's the weather like today?", the intent might be "weather_inquiry".</p>
+
+                <h3>Best Practices</h3>
+                <ul>
+                    <li>Use clear, descriptive names for your intents</li>
+                    <li>Add multiple variations of questions for each intent</li>
+                    <li>Keep answers concise and helpful</li>
+                    <li>Test your chatbot thoroughly before deploying</li>
+                </ul>
+
+                <h3>API Endpoints</h3>
+                <div class="api-endpoints">
+                    <div class="endpoint">
+                        <code>POST /api/create-chatbot</code>
+                        <p>Create a new chatbot with intents, questions, and answers</p>
+                    </div>
+                    <div class="endpoint">
+                        <code>GET /api/chatbots</code>
+                        <p>Get list of all created chatbots</p>
+                    </div>
+                    <div class="endpoint">
+                        <code>GET /api/chatbot/&lt;chatbot_id&gt;</code>
+                        <p>Get specific chatbot details</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="my-chatbots" class="tab-content">
+            <h2>My Chatbots</h2>
+            <div class="chatbots-list-container">
+                <button id="refresh-chatbots" class="btn btn-secondary">Refresh List</button>
+                <div id="chatbots-list">
+                    <!-- Chatbots will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer>
+        <div class="foot">
+            <h4>All Right Reservied ChatBOT Maker @2025</h4>
+             <p>Developed By Jayrajmalge</p>
+        </div>
+    </footer>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+ipykernel
+pandas
+seaborn
+scikit-learn
+xgBoost
+catBoost
+dill
+flask
+nltk
