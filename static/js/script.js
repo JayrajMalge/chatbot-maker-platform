@@ -222,15 +222,63 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             body: JSON.stringify(data)
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success') {
-                showMessage(data.message, 'success');
-                resetForm();
-                // Switch to My Chatbots tab
-                document.querySelector('[data-tab="my-chatbots"]').click();
+        .then(response => {
+            // Check if response is a pickle file (binary data)
+            const contentType = response.headers.get('content-type');
+            
+            if (contentType && contentType.includes('application/octet-stream')) {
+                // It's a pickle file - handle download
+                return response.blob().then(blob => {
+                    return {
+                        type: 'file',
+                        blob: blob,
+                        filename: getFilenameFromHeaders(response.headers, data.chatbotName)
+                    };
+                });
             } else {
-                showMessage(data.message, 'error');
+                // It's a JSON response
+                return response.json().then(jsonData => {
+                    return {
+                        type: 'json',
+                        data: jsonData
+                    };
+                });
+            }
+        })
+        .then(result => {
+            if (result.type === 'file') {
+                // Handle file download
+                downloadFile(result.blob, result.filename);
+                showMessage(`Chatbot "${data.chatbotName}" created and downloaded successfully!`, 'success');
+                resetForm();
+                // Switch to My Chatbots tab after a delay
+                setTimeout(() => {
+                    document.querySelector('[data-tab="my-chatbots"]').click();
+                }, 2000);
+                
+            } else if (result.type === 'json') {
+                // Handle JSON response
+                if (result.data.status === 'success') {
+                    showMessage(result.data.message, 'success');
+                    
+                    // If there's a download URL in the response, trigger download
+                    if (result.data.download_url) {
+                        downloadPickleFile(result.data.download_url, data.chatbotName)
+                            .then(() => {
+                                showMessage('Model file downloaded successfully!', 'success');
+                            })
+                            .catch(error => {
+                                console.error('Download failed:', error);
+                                showMessage('Chatbot created but download failed', 'warning');
+                            });
+                    }
+                    
+                    resetForm();
+                    // Switch to My Chatbots tab
+                    document.querySelector('[data-tab="my-chatbots"]').click();
+                } else {
+                    showMessage(result.data.message, 'error');
+                }
             }
         })
         .catch((error) => {
@@ -239,6 +287,140 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
+    // Helper function to download file from blob
+    function downloadFile(blob, filename) {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        
+        // Clean up
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    }
+    
+    // Helper function to get filename from headers
+    function getFilenameFromHeaders(headers, chatbotName) {
+        const contentDisposition = headers.get('Content-Disposition');
+        let filename = `${chatbotName.replace(/ /g, '_')}_model.pkl`;
+        
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+            if (filenameMatch) {
+                filename = filenameMatch[1];
+            }
+        }
+        
+        return filename;
+    }
+    
+    // Helper function to download pickle file from URL
+    function downloadPickleFile(downloadUrl, chatbotName) {
+        return fetch(downloadUrl)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to download model file');
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                const filename = getFilenameFromHeaders(response.headers, chatbotName);
+                downloadFile(blob, filename);
+            });
+    }
+    
+    // If you want to show download progress, use this enhanced version:
+    function downloadWithProgress(downloadUrl, chatbotName) {
+        return new Promise((resolve, reject) => {
+            fetch(downloadUrl)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Download failed');
+                    }
+                    
+                    const contentLength = response.headers.get('content-length');
+                    const total = parseInt(contentLength, 10);
+                    let loaded = 0;
+                    
+                    const reader = response.body.getReader();
+                    const chunks = [];
+                    
+                    function read() {
+                        return reader.read().then(({ done, value }) => {
+                            if (done) {
+                                // Combine chunks and download
+                                const blob = new Blob(chunks);
+                                const filename = getFilenameFromHeaders(response.headers, chatbotName);
+                                downloadFile(blob, filename);
+                                hideDownloadProgress();
+                                resolve();
+                                return;
+                            }
+                            
+                            chunks.push(value);
+                            loaded += value.length;
+                            
+                            // Update progress if you have a progress bar
+                            if (total) {
+                                const progress = (loaded / total) * 100;
+                                updateDownloadProgress(progress);
+                            }
+                            
+                            return read();
+                        });
+                    }
+                    
+                    return read();
+                })
+                .catch(error => {
+                    hideDownloadProgress();
+                    reject(error);
+                });
+        });
+    }
+    
+    // Progress bar functions (optional)
+    function updateDownloadProgress(percent) {
+        let progressBar = document.getElementById('downloadProgressBar');
+        if (!progressBar) {
+            progressBar = document.createElement('div');
+            progressBar.id = 'downloadProgressBar';
+            progressBar.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 4px;
+                background: #e2e8f0;
+                z-index: 1001;
+            `;
+            const progressFill = document.createElement('div');
+            progressFill.id = 'downloadProgressFill';
+            progressFill.style.cssText = `
+                height: 100%;
+                background: #48bb78;
+                transition: width 0.3s ease;
+                width: 0%;
+            `;
+            progressBar.appendChild(progressFill);
+            document.body.appendChild(progressBar);
+        }
+        
+        const progressFill = document.getElementById('downloadProgressFill');
+        if (progressFill) {
+            progressFill.style.width = `${percent}%`;
+        }
+    }
+    
+    function hideDownloadProgress() {
+        const progressBar = document.getElementById('downloadProgressBar');
+        if (progressBar) {
+            progressBar.remove();
+        }
+    }
     function resetForm() {
         document.getElementById('chatbot-name').value = '';
         intentsContainer.innerHTML = '';
@@ -406,46 +588,36 @@ document.addEventListener('DOMContentLoaded', function() {
             .replace(/'/g, "&#039;");
     }
     
-    // Add one initial intent when page loads
     addIntent();
 
-        // DOM Elements
     const uploadJsonBtn = document.getElementById('uploadJsonBtn');
     const jsonUploadModal = document.getElementById('jsonUploadModal');
     const closeModalBtn = document.getElementById('closeModalBtn');
+    const chatbotNameInput = document.getElementById('chatbotNameInput');
     const jsonFileInput = document.getElementById('jsonFileInput');
     const jsonPreview = document.getElementById('jsonPreview');
     const submitJsonBtn = document.getElementById('submitJsonBtn');
     const statusMessage = document.getElementById('statusMessage');
-
-    // Open Modal
     uploadJsonBtn.addEventListener('click', () => {
         jsonUploadModal.style.display = 'flex';
     });
-
-    // Close Modal
     closeModalBtn.addEventListener('click', () => {
         jsonUploadModal.style.display = 'none';
         resetForm();
     });
-
-    // Close modal when clicking outside
     jsonUploadModal.addEventListener('click', (e) => {
         if (e.target === jsonUploadModal) {
             jsonUploadModal.style.display = 'none';
             resetForm();
         }
     });
-
-    // File Input Change
     jsonFileInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (file) {
             readJsonFile(file);
         }
     });
-
-    // Read JSON File
+    chatbotNameInput.addEventListener('input', validateForm);
     function readJsonFile(file) {
         const reader = new FileReader();
         
@@ -453,12 +625,13 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 const jsonContent = e.target.result;
                 const jsonData = JSON.parse(jsonContent);
-                
-                // Validate JSON structure
                 if (validateJsonStructure(jsonData)) {
                     jsonPreview.textContent = JSON.stringify(jsonData, null, 2);
                     jsonPreview.style.color = '#e2e8f0';
-                    submitJsonBtn.disabled = false;
+                    if (!chatbotNameInput.value.trim() && jsonData.chatbotName) {
+                        chatbotNameInput.value = jsonData.chatbotName;
+                    }
+                    validateForm();
                     showStatus('File loaded successfully!', 'success');
                 } else {
                     throw new Error('Invalid JSON structure. Expected format: { "chatbotName": "...", "intents": [...] }');
@@ -480,14 +653,10 @@ document.addEventListener('DOMContentLoaded', function() {
         
         reader.readAsText(file);
     }
-
-    // Validate JSON Structure
     function validateJsonStructure(data) {
         return (
             data &&
             typeof data === 'object' &&
-            data.chatbotName &&
-            typeof data.chatbotName === 'string' &&
             Array.isArray(data.intents) &&
             data.intents.every(intent => 
                 intent.name && 
@@ -497,11 +666,19 @@ document.addEventListener('DOMContentLoaded', function() {
             )
         );
     }
-
-    // Submit JSON to Server
+    function validateForm() {
+        const hasFile = jsonFileInput.files.length > 0;
+        const hasValidName = chatbotNameInput.value.trim().length > 0;
+        const hasValidJson = jsonPreview.textContent !== 'No file selected' && 
+                            !jsonPreview.textContent.startsWith('Error:');
+        
+        submitJsonBtn.disabled = !(hasFile && hasValidName && hasValidJson);
+    }
     submitJsonBtn.addEventListener('click', async () => {
         const file = jsonFileInput.files[0];
-        if (!file) return;
+        const chatbotName = chatbotNameInput.value.trim();
+        
+        if (!file || !chatbotName) return;
         
         try {
             submitJsonBtn.disabled = true;
@@ -510,27 +687,80 @@ document.addEventListener('DOMContentLoaded', function() {
             const jsonContent = await readFileAsText(file);
             const jsonData = JSON.parse(jsonContent);
             
+            // Prepare data with chatbot name from input
+            const requestData = {
+                ...jsonData,
+                chatbotName: chatbotName  // Override with input field value
+            };
+            
             const response = await fetch('/api/upload-json-chatbot', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(jsonData)
+                body: JSON.stringify(requestData)
             });
             
-            const result = await response.json();
-            
-            if (result.status === 'success') {
-                showStatus(`Chatbot "${result.chatbot_name}" created successfully!`, 'success');
-                setTimeout(() => {
-                    jsonUploadModal.style.display = 'none';
-                    resetForm();
-                    // Optional: Refresh page or update UI
-                    location.reload();
-                }, 2000);
-            } else {
-                throw new Error(result.message);
+            // Check if response is successful
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Upload failed');
             }
+            
+            // Check if response is a pickle file (binary data)
+            const contentType = response.headers.get('content-type');
+            
+            if (contentType && contentType.includes('application/octet-stream')) {
+                // It's a pickle file - download it
+                const blob = await response.blob();
+                
+                // Get filename from Content-Disposition header or generate one
+                let filename = `${chatbotName.replace(/ /g, '_')}_model.pkl`;
+                const contentDisposition = response.headers.get('Content-Disposition');
+                
+                if (contentDisposition) {
+                    const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+                    if (filenameMatch) {
+                        filename = filenameMatch[1];
+                    }
+                }
+                
+                // Create download link and trigger download
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                
+                // Clean up
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                showStatus(`Chatbot "${chatbotName}" created and downloaded successfully!`, 'success');
+                
+            } else {
+                // It's a JSON response (if you're using the alternative approach)
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    showStatus(`Chatbot "${result.chatbot_name}" created successfully!`, 'success');
+                    
+                    // If there's a download URL in the response, trigger download
+                    if (result.download_url) {
+                        await downloadPickleFile(result.download_url, chatbotName);
+                    }
+                } else {
+                    throw new Error(result.message);
+                }
+            }
+            
+            // Close modal after successful creation
+            setTimeout(() => {
+                jsonUploadModal.style.display = 'none';
+                resetForm();
+            }, 3000);
             
         } catch (error) {
             showStatus(`Error: ${error.message}`, 'error');
@@ -539,8 +769,146 @@ document.addEventListener('DOMContentLoaded', function() {
             submitJsonBtn.textContent = 'Create Chatbot from JSON';
         }
     });
-
-    // Helper function to read file as text
+    
+    // Helper function to download pickle file from URL
+    async function downloadPickleFile(downloadUrl, chatbotName) {
+        try {
+            const response = await fetch(downloadUrl);
+            
+            if (!response.ok) {
+                throw new Error('Failed to download model file');
+            }
+            
+            const blob = await response.blob();
+            
+            // Get filename from headers or use default
+            let filename = `${chatbotName.replace(/ /g, '_')}_model.pkl`;
+            const contentDisposition = response.headers.get('Content-Disposition');
+            
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+                if (filenameMatch) {
+                    filename = filenameMatch[1];
+                }
+            }
+            
+            // Trigger download
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            
+            // Clean up
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            console.log('Model file downloaded successfully');
+            
+        } catch (error) {
+            console.error('Failed to download model file:', error);
+            showStatus('Chatbot created but failed to download model file', 'error');
+        }
+    }
+    
+    // Alternative: If you want to show download progress
+    async function downloadWithProgress(downloadUrl, chatbotName) {
+        try {
+            const response = await fetch(downloadUrl);
+            
+            if (!response.ok) {
+                throw new Error('Download failed');
+            }
+            
+            const contentLength = response.headers.get('content-length');
+            const total = parseInt(contentLength, 10);
+            let loaded = 0;
+            
+            const reader = response.body.getReader();
+            const chunks = [];
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                
+                if (done) break;
+                
+                chunks.push(value);
+                loaded += value.length;
+                
+                // Update progress if you have a progress bar
+                if (total) {
+                    const progress = (loaded / total) * 100;
+                    updateDownloadProgress(progress);
+                }
+            }
+            
+            // Combine chunks into blob
+            const blob = new Blob(chunks);
+            
+            // Trigger download
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = `${chatbotName.replace(/ /g, '_')}_model.pkl`;
+            document.body.appendChild(a);
+            a.click();
+            
+            // Clean up
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            // Hide progress bar
+            hideDownloadProgress();
+            
+        } catch (error) {
+            console.error('Download failed:', error);
+            hideDownloadProgress();
+            showStatus('Download failed', 'error');
+        }
+    }
+    
+    // Optional: Progress bar functions
+    function updateDownloadProgress(percent) {
+        let progressBar = document.getElementById('downloadProgressBar');
+        if (!progressBar) {
+            progressBar = document.createElement('div');
+            progressBar.id = 'downloadProgressBar';
+            progressBar.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 4px;
+                background: #e2e8f0;
+                z-index: 1001;
+            `;
+            const progressFill = document.createElement('div');
+            progressFill.id = 'downloadProgressFill';
+            progressFill.style.cssText = `
+                height: 100%;
+                background: #48bb78;
+                transition: width 0.3s ease;
+                width: 0%;
+            `;
+            progressBar.appendChild(progressFill);
+            document.body.appendChild(progressBar);
+        }
+        
+        const progressFill = document.getElementById('downloadProgressFill');
+        if (progressFill) {
+            progressFill.style.width = `${percent}%`;
+        }
+    }
+    
+    function hideDownloadProgress() {
+        const progressBar = document.getElementById('downloadProgressBar');
+        if (progressBar) {
+            progressBar.remove();
+        }
+    }
     function readFileAsText(file) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -549,17 +917,14 @@ document.addEventListener('DOMContentLoaded', function() {
             reader.readAsText(file);
         });
     }
-
-    // Reset Form
     function resetForm() {
+        chatbotNameInput.value = '';
         jsonFileInput.value = '';
         jsonPreview.textContent = 'No file selected';
         jsonPreview.style.color = '#e2e8f0';
         submitJsonBtn.disabled = true;
         statusMessage.style.display = 'none';
     }
-
-    // Show Status Message
     function showStatus(message, type) {
         statusMessage.textContent = message;
         statusMessage.className = `status-message ${type}`;

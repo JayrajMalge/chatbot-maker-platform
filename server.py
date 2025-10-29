@@ -1,5 +1,5 @@
-from flask import Flask, render_template, request, jsonify, session
-import json
+from flask import Flask, render_template, request, jsonify, session,send_file
+import io
 import os
 from datetime import datetime
 import uuid
@@ -7,6 +7,7 @@ import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 
 from sklearn.naive_bayes import MultinomialNB
+from sklearn.linear_model import LogisticRegression
 from nltk.stem import PorterStemmer
 from model import ModeltoPkl
 import dill;
@@ -89,11 +90,12 @@ def create_chatbot():
         df['intent']=encoder.fit_transform(df['intent'])
         bow_x,counter = create_courpus(df)
         bow_x['output']=df['intent']    
-        print(bow_x)
         bow_trainer=MultinomialNB()
         bow_trainer.fit(bow_x.drop(columns=['output']),bow_x['output'])
         savetopkl=ModeltoPkl(bow_trainer,counter,df)
-        dill.dump(savetopkl,open(chatbot_name+".pkl",'wb'))        
+        pickle_buffer = io.BytesIO()
+        dill.dump(savetopkl, pickle_buffer)
+        pickle_buffer.seek(0) 
         chatbot_id = str(uuid.uuid4())
         chatbot_data = {
             'id': chatbot_id,
@@ -105,21 +107,12 @@ def create_chatbot():
         }
         
         chatbots_storage[chatbot_id] = chatbot_data        
-        return jsonify({
-            'status': 'success',
-            'message': 'Chatbot created successfully!',
-            'chatbot_id': chatbot_id,
-            'chatbot_name': chatbot_name,
-            'intent_count': len(intents),
-            'total_questions': sum(len(intent.get('questions', [])) for intent in intents),
-            'total_answers': sum(len(intent.get('answers', [])) for intent in intents),
-            'dataframe_rows': len(df),
-            'dataframe_info': {
-                'shape': df.shape,
-                'columns': df.columns.tolist(),
-                'intents': df['intent'].unique().tolist()
-            }
-        })
+        return send_file(
+            pickle_buffer,
+            as_attachment=True,
+            download_name=f"{chatbot_name.replace(' ', '_')}_model.pkl",
+            mimetype='application/octet-stream'
+        ) 
     
     except Exception as e:
         print(f"Error creating chatbot: {str(e)}")
@@ -257,6 +250,112 @@ def findall_avg(words):
     for word in words:
         x.append(avgerage_vector(word,processor=processor))
     return x
+
+
+
+@app.route('/api/upload-json-chatbot', methods=['POST'])
+def upload_json_chatbot():
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No JSON data received'
+            }), 400
+        
+        # Validate required fields
+        required_fields = ['chatbotName', 'intents']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Missing required field: {field}'
+                }), 400
+        
+        chatbot_name = data['chatbotName'].strip()
+        if not chatbot_name:
+            return jsonify({
+                'status': 'error',
+                'message': 'Chatbot name cannot be empty'
+            }), 400
+        
+        intents = data['intents']
+        if not isinstance(intents, list):
+            return jsonify({
+                'status': 'error',
+                'message': 'Intents must be an array'
+            }), 400
+        
+        for i, intent in enumerate(intents):
+            if not intent.get('name') or not intent.get('name').strip():
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Intent at index {i} must have a name'
+                }), 400
+            
+            questions = intent.get('questions', [])
+            answers = intent.get('answers', [])
+            
+            if not questions:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Intent "{intent["name"]}" must have at least one question'
+                }), 400
+            
+            if not answers:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Intent "{intent["name"]}" must have at least one answer'
+                }), 400
+        
+        chatbot_id = str(uuid.uuid4())
+        dataframe_rows = []
+        for intent in intents:
+            intent_name = intent.get('name', '').strip()
+            questions = intent.get('questions', [])
+            answers = intent.get('answers', [])            
+            for question in questions:
+                for answer in answers:
+                    dataframe_rows.append({
+                    'question': question.lower().strip(),
+                    'answer': answer.lower() if answer.lower() else "",
+                    'intent': intent_name.lower()
+                   })
+        
+        df = pd.DataFrame(dataframe_rows)
+        encoder=LabelEncoder()
+        df['intent']=encoder.fit_transform(df['intent'])
+        bow_x,counter = create_courpus(df)
+        bow_x['output']=df['intent']   
+        bow_trainer=MultinomialNB()
+        bow_trainer.fit(bow_x.drop(columns=['output']),bow_x['output'])
+        savetopkl=ModeltoPkl(bow_trainer,counter,df)
+        pickle_buffer = io.BytesIO()
+        dill.dump(savetopkl, pickle_buffer)
+        pickle_buffer.seek(0)  
+        chatbot_data = {
+            'id': chatbot_id,
+            'name': chatbot_name,
+            'intents': intents,
+            'dataframe': df.to_dict('records'),
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat()
+        }
+        chatbots_storage[chatbot_id] = chatbot_data
+        return send_file(
+            pickle_buffer,
+            as_attachment=True,
+            download_name=f"{chatbot_name.replace(' ', '_')}_model.pkl",
+            mimetype='application/octet-stream'
+        ) 
+        
+    except Exception as e:
+        print(f"Error creating chatbot from JSON: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Internal server error: {str(e)}'
+        }), 500
 
 if __name__ == '__main__':
     os.makedirs('templates', exist_ok=True)

@@ -12,5 +12,5 @@ class ModeltoPkl:
         output=self.model.predict(testing)
         random_number = random.randint(0, len(self.data[self.data['intent']==output[0]]))
         predicted_records = self.data[self.data['intent']==output[0]]
-        return predicted_records.iloc[random_number]
+        return predicted_records.iloc[random_number]['answer']
         
